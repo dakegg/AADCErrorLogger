@@ -6,11 +6,13 @@ along with the attribute in conflict, the error and the error value.
 If the export error is due to an object in the tenant with a conflicting value, the script will output the Azure Object ID of the conflicting object, object type,
 along with the last dirsync time of the object (if applicable) and the SID of the conflicting Azure object.
 
-The script takes 2 arguments:
+The script takes 3 arguments:
 
-1 - The number of recent Azure connector errors to retrieve.
+1 - [NumberOfErrors] The number of recent Azure connector errors to retrieve.  
 
-2 - A switch to allow skipping the use of Azure AD powershell to retrieve offending object details.
+2 - [NoAzure] A switch to allow skipping the use of Azure AD powershell to retrieve offending object details. 
+
+3 - [FileName] Filename to use for the output of the error details (CSV) 
 
 If prompted for Azure credentials and the prompt fails, the script will default to local attribute details only and not retrieve Azure data.
 
