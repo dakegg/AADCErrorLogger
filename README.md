@@ -9,6 +9,7 @@ along with the last dirsync time of the object (if applicable) and the SID of th
 The script takes 2 arguments:
 
 1 - The number of recent Azure connector errors to retrieve.
+
 2 - A switch to allow skipping the use of Azure AD powershell to retrieve offending object details.
 
 If prompted for Azure credentials and the prompt fails, the script will default to local attribute details only and not retrieve Azure data.
