@@ -58,13 +58,16 @@
 	EMAIL:	dkegg@microsoft.com
 
 	VERSION HISTORY:
-	1.0 24 April, 2022
-		Initial Version
+	1.0 24 April, 2022 	Initial Version
+	1.1 25 April, 2022	Added Try\Catch to Azure object calls
+						ImmutableID and conversion to Azure AAD Connect DN for reporting
+						Added UserType to report for identification or conflicts with Guest objects
+
 #>
 
 [CmdletBinding()]
 Param (
-	[int]$NumberOfErrors = 649,
+	[int]$NumberOfErrors = 618,
 	[switch]$NoAzure,
 	[string]$FileName = ".\ErrorsLog.csv"
 )
@@ -78,14 +81,18 @@ If (Test-Path $FileName)
 
 if (!$NoAzure)
 {
-	Try
-	{
-		Connect-AzureAD -ea Stop
-	}
+	Try { Get-AzureADTenantDetail -ea Stop }
 	Catch
 	{
-		Write-Host -Fore Yellow "Unable to connect to Azure AD, limiting report detail to data from AAD Connect."
-		$NoAzure = $true
+		Try
+		{
+			Connect-AzureAD -ea Stop
+		}
+		Catch
+		{
+			Write-Host -Fore Yellow "Unable to connect to Azure AD, limiting report detail to data from AAD Connect."
+			$NoAzure = $true
+		}
 	}
 }
 
@@ -99,7 +106,10 @@ $TempObject = New-Object PSObject -Property @{
 	"Attribute Value In Conflict" = $null
 	"Azure ObjectID in Conflict" = $null
 	"Cloud Conflict Object Type" = $null
+	"Cloud Conflict Object User Type" = $null
 	"Cloud Conflict SID" = $null
+	"Cloud Conflict ImmutableID" = $null
+	"Cloud Conflict AzureDN" = $null
     "Cloud Conflict Dir Synced"	= $false                
     "Cloud Conflict Last Dirsync" = $null
 } 
@@ -111,7 +121,7 @@ $Count = 0
 foreach ($Item in $LogErrors)
 {
 	$ErrorObject = $null;
-	$ErrorObject = $TempObject | Select-Object "Object Type", "AzureDN", "OnPrem Identifier", "AttributeInError", "Error Description", "Attribute Value In Conflict", "Azure ObjectID in Conflict", "Cloud Conflict Object Type", "Cloud Conflict SID", "Cloud Conflict Dir Synced", "Cloud Conflict Last Dirsync"
+	$ErrorObject = $TempObject | Select-Object "Object Type", "AzureDN", "OnPrem Identifier", "AttributeInError", "Error Description", "Attribute Value In Conflict", "Azure ObjectID in Conflict", "Cloud Conflict Object Type", "Cloud Conflict Object User Type", "Cloud Conflict SID", "Cloud Conflict ImmutableID", "Cloud Conflict AzureDN", "Cloud Conflict Dir Synced", "Cloud Conflict Last Dirsync"
 		
 	$Detail = $Item.Message
 	$AzureDNStartLocation = $detail.IndexOf("DN:")
@@ -171,42 +181,43 @@ foreach ($Item in $LogErrors)
 	$ErrorObject.AttributeInError = $AttributeInConflict
 	$ErrorObject.'Error Description' = $AttributeValueInConflict
 	$ErrorObject.'Azure ObjectID in Conflict' = $ObjectIdInConflict
-	
-	<#
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "Object Type" -Value $AzureObjectType
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "AzureDN" -Value $AzureDN
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "OnPrem Identifier" -Value $OnPremDN[0]
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "AttributeInError" -Value $AttributeInConflict
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "Error Description" -Value $ErrorName
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "Attribute Value In Conflict" -Value $AttributeValueInConflict
-	$ErrorObject | Add-Member -MemberType NoteProperty -Name "Azure ObjectID in Conflict" -Value $ObjectIdInConflict
-	#>
-	
+
 	# need azure connectivity here, or nothing returned
-	if (!$NoAzure -or !$ObjectIdInConflict)
+	if (!$NoAzure -and ($ObjectIdInConflict -ne $null) )
 	{
 		$AzureObject = $null
-		$AzureObject = Get-AzureADObjectByObjectId -ObjectIds $ObjectIdInConflict
-		If ($AzureObject)
+		Try
 		{
-			$CloudConflictObject = $AzureObject.ObjectType
-			$CloudConflictSID = $AzureObject.OnPremisesSecurityIdentifier
-			$CloudConflictDirSynced = $AzureObject.DirSyncEnabled
-			$CloudConflictLastDirsync = $AzureObject.LastDirSyncTime
-			
-			<#
-			$ErrorObject | Add-Member -MemberType NoteProperty -Name "Cloud Conflict Object Type" -Value $CloudConflictObject
-			$ErrorObject | Add-Member -MemberType NoteProperty -Name "Cloud Conflict SID" -Value $CloudConflictSID
-			$ErrorObject | Add-Member -MemberType NoteProperty -Name "Cloud Conflict Dir Synced" -Value $CloudConflictDirSynced
-			$ErrorObject | Add-Member -MemberType NoteProperty -Name "Cloud Conflict Last Dirsync" -Value $CloudConflictLastDirsync
-			#>
-			
-			$ErrorObject.'Cloud Conflict Object Type' = $CloudConflictObject
-			$ErrorObject.'Cloud Conflict SID' = $CloudConflictSID
-			$ErrorObject.'Cloud Conflict Dir Synced' = $CloudConflictDirSynced
-			$ErrorObject.'Cloud Conflict Last Dirsync' = $CloudConflictLastDirsync
-			
+			$AzureObject = Get-AzureADObjectByObjectId -ObjectIds $ObjectIdInConflict -ea Stop
+			If ($AzureObject)
+			{
+				$CloudConflictObject = $AzureObject.ObjectType
+				$CloudConflictSID = $AzureObject.OnPremisesSecurityIdentifier
+				$CloudConflictDirSynced = $AzureObject.DirSyncEnabled
+				$CloudConflictLastDirsync = $AzureObject.LastDirSyncTime
+				
+				$ErrorObject.'Cloud Conflict Object Type' = $CloudConflictObject
+				$ErrorObject.'Cloud Conflict Object User Type' = $AzureObject.UserType
+				$ErrorObject.'Cloud Conflict SID' = $CloudConflictSID
+				
+				$ErrorObject.'Cloud Conflict ImmutableID' = $AzureObject.ImmutableId
+				
+				if ($AzureObject.ImmutableID)
+				{
+					$enc = [system.text.encoding]::utf8
+					$result = $enc.getbytes($AzureObject.ImmutableId)
+					$newarray = @{ }
+					$newarray = $result | foreach { [convert]::tostring($_, 16) }
+					$middle = $newarray -join ''
+					$ErrorObject.'Cloud Conflict AzureDN' = "CN={" + $middle + "}"
+				}
+				
+				$ErrorObject.'Cloud Conflict Dir Synced' = $CloudConflictDirSynced
+				$ErrorObject.'Cloud Conflict Last Dirsync' = $CloudConflictLastDirsync
+				
+			}
 		}
+		Catch {$null}
 	}
 	
 	$ErrorObject | Export-Csv ErrorsLog.csv -Append -NoTypeInformation
@@ -217,6 +228,4 @@ foreach ($Item in $LogErrors)
 	Write-Progress -Activity $ActivityMessage -Status $StatusMessage -PercentComplete $PercentComplete
 	$Count ++
 }
-
-
 
